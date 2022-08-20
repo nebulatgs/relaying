@@ -9,7 +9,9 @@
 		console.log(stream);
 		const peer = new Peer({
 			debug: 3,
-			host: 'peerjs-server-production.up.railway.app'
+			host: 'peerjs.hop.sh',
+			key: 'relaying',
+			secure: true
 		});
 		peer.on('error', (err) => {
 			console.log(err);

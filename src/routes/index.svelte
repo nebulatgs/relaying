@@ -12,7 +12,9 @@
 		const { Peer } = await import('peerjs');
 		peer = new Peer(code, {
 			debug: 3,
-			host: 'peerjs-server-production.up.railway.app'
+			host: 'peerjs.hop.sh',
+			key: 'relaying',
+			secure: true
 		});
 		peer.on('error', (err) => {
 			console.log(err);
