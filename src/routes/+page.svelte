@@ -1,16 +1,17 @@
 <script lang="ts">
 	import type { MediaConnection, Peer } from 'peerjs';
 	import { onMount } from 'svelte';
+	import type { PageData } from './$types';
 
-	export let code: string;
-	export let qrCode: string;
+	export let data: PageData;
+
 	let peer: Peer;
 	let video: HTMLVideoElement;
 	let connected = false;
 
 	onMount(async () => {
 		const { Peer } = await import('peerjs');
-		peer = new Peer(code, {
+		peer = new Peer(data.code, {
 			debug: 3,
 			host: 'peerjs.hop.sh',
 			key: 'relaying',
@@ -35,10 +36,10 @@
 <div class="h-screen w-full flex flex-wrap justify-evenly items-center">
 	{#if !connected}
 		<h1 class="font-mono text-7xl lg:text-9xl tracking-wide text-slate-700 ">
-			{code}
+			{data.code}
 		</h1>
 		<div class="w-3/4 sm:w-[unset] sm:h-1/2 aspect-square bg-stone-200 rounded-md">
-			{@html qrCode}
+			{@html data.qrCode}
 		</div>
 	{/if}
 
