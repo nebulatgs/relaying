@@ -1,6 +1,8 @@
+import type { NatsConnection } from 'nats.ws';
+
 export class EncryptDecrypt {
 	private isInitialized = false;
-	private key: CryptoKey = new CryptoKey();
+	private key?: CryptoKey;
 	private iv: Uint8Array = new Uint8Array(12);
 	private enc = new TextEncoder();
 	private dec = new TextDecoder();
@@ -29,14 +31,20 @@ export class EncryptDecrypt {
 	 **/
 	public async encrypt(data: unknown) {
 		if (!this.isInitialized) throw new Error('EncDec not initialized');
+
+		// Encrypt the data
 		const bytes = await crypto.subtle.encrypt(
 			{
 				name: 'AES-GCM',
 				iv: this.iv
 			},
-			this.key,
+			this.key!,
+
+			// Get a binary representation of the data (JSON encoded)
 			this.enc.encode(JSON.stringify(data))
 		);
+
+		// Return the ciphertext as a Uint8Array
 		return new Uint8Array(bytes);
 	}
 
@@ -46,85 +54,34 @@ export class EncryptDecrypt {
 	 **/
 	public async decrypt<T = unknown>(data: Uint8Array) {
 		if (!this.isInitialized) throw new Error('EncDec not initialized');
+
+		// Decrypt the ciphertext
 		const bytes = await crypto.subtle.decrypt(
 			{
 				name: 'AES-GCM',
 				iv: this.iv
 			},
-			this.key,
+			this.key!,
 			data
 		);
+
+		// Return the decrypted data as an object
 		return JSON.parse(this.dec.decode(bytes)) as T;
 	}
 }
 
-// /**
-//  * @param data - object to encrypt
-//  * @param key - base64 encoded key in JWK format
-//  * @param iv - base64 encoded iv
-//  * @returns ciphertext
-//  **/
-// export async function encryptBase64JSON(data: unknown, key: string, iv: string) {
-// 	const bytes = await encryptBase64(JSON.stringify(data), key, iv);
-// 	return bytes;
-// }
-
-// /**
-//  * @param data - string to encrypt
-//  * @param key - base64 encoded key in JWK format
-//  * @param iv - base64 encoded iv
-//  * @returns ciphertext
-//  **/
-// export async function encryptBase64(data: string, key: string, iv: string) {
-// 	const ivDec = atob(iv);
-// 	const enc = new TextEncoder();
-// 	const cryptoKey = await crypto.subtle.importKey('jwk', JSON.parse(atob(key)), 'AES-GCM', true, [
-// 		'encrypt',
-// 		'decrypt'
-// 	]);
-// 	const bytes = await crypto.subtle.encrypt(
-// 		{
-// 			name: 'AES-GCM',
-// 			iv: enc.encode(ivDec)
-// 		},
-// 		cryptoKey,
-// 		enc.encode(data)
-// 	);
-// 	return new Uint8Array(bytes);
-// }
-
-// /**
-//  * @param data - ciphertext
-//  * @param key - base64 encoded key in JWK format
-//  * @param iv - base64 encoded iv
-//  * @returns parsed data
-//  **/
-// export async function decryptBase64JSON<T>(data: Uint8Array, key: string, iv: string) {
-// 	const json = await decryptBase64(data, key, iv);
-// 	return JSON.parse(json) as T;
-// }
-
-// /**
-//  * @param data - ciphertext
-//  * @param key - base64 encoded key in JWK format
-//  * @param iv - base64 encoded iv
-//  * @returns parsed data
-//  **/
-// export async function decryptBase64(data: Uint8Array, key: string, iv: string) {
-// 	const ivDec = atob(iv);
-// 	const enc = new TextEncoder();
-// 	const dec = new TextDecoder();
-// 	const cryptoKey = await crypto.subtle.importKey('jwk', JSON.parse(atob(key)), 'AES-GCM', true, [
-// 		'encrypt',
-// 		'decrypt'
-// 	]);
-// 	const bytes = await crypto.subtle.decrypt(
-// 		{
-// 			name: 'AES-GCM',
-// 			iv: enc.encode(ivDec)
-// 		},
-// 		cryptoKey,
-// 		data
-// 	);
-// 	return dec.decode(bytes);
-// }
+export function natsOnce<T = unknown>(nc: NatsConnection, c: EncryptDecrypt, subject: string) {
+	return new Promise<T>((res, rej) => {
+		const sub = nc.subscribe(subject, {
+			callback: async (err, msg) => {
+				if (err) {
+					rej(err);
+					return;
+				}
+				const answer = await c.decrypt<T>(msg.data);
+				res(answer);
+			}
+		});
+		sub.unsubscribe(1);
+	});
+}

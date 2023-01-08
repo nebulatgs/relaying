@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { EncryptDecrypt } from '$lib/utils';
-	import type { NatsConnection } from 'nats.ws';
+	import { EncryptDecrypt, natsOnce } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 
@@ -8,88 +7,74 @@
 
 	let video: HTMLVideoElement;
 	let connected = false;
-	let nc: NatsConnection | null = null;
 
 	onMount(async () => {
+		// Initialize the encryption/decryption class
 		const c = new EncryptDecrypt();
 		await c.init(data.code, data.iv);
 
+		// Connect to the NATS server
+		const { connect } = await import('nats.ws');
+		const nc = await connect({
+			servers: 'wss://demo.nats.io:8443'
+		});
+
+		// Open a new PeerConnection
 		const pc = new RTCPeerConnection({
 			iceServers: [
+				// No TURN server (this is meant to be used on a local network)
 				{
+					// Using Google's public STUN server
 					urls: 'stun:stun.l.google.com:19302'
 				}
 			]
 		});
-		// const enc = new TextEncoder();
-		// const dec = new TextDecoder();
-		// const key = await crypto.subtle.importKey('jwk', JSON.parse(atob(data.code)), 'AES-GCM', true, [
-		// 	'encrypt',
-		// 	'decrypt'
-		// ]);
-		await pc.setLocalDescription(await pc.createOffer());
 
-		const { connect } = await import('nats.ws');
-		nc = await connect({
-			servers: 'wss://demo.nats.io:8443'
-		});
+		pc.onicecandidate = async ({ candidate }) => {
+			if (candidate) {
+				// Send the ICE candidate to the remote peer
+				nc.publish(`relaying.candidate.host`, await c.encrypt(candidate));
+			}
+		};
 
-		const iv = atob(data.iv);
-		nc.subscribe('relaying.offer', {
+		// Set up the ICE candidate handlers
+		const iceSub = nc.subscribe(`relaying.candidate.device`, {
 			callback: async (err, msg) => {
-				// const offer = JSON.parse(
-				// 	dec.decode(
-				// 		await crypto.subtle.decrypt({ name: 'AES-GCM', iv: enc.encode(iv) }, key, msg.data)
-				// 	)
-				// );
-				// console.log(offer);
-				const offer = await c.decrypt<RTCSessionDescriptionInit>(msg.data);
-				await pc.setRemoteDescription(new RTCSessionDescription(offer));
-				await pc.setLocalDescription(await pc.createAnswer());
-				nc!.publish(
-					'relaying.answer',
-					// new Uint8Array(
-					// 	await crypto.subtle.encrypt(
-					// 		{ name: 'AES-GCM', iv: enc.encode(iv) },
-					// 		key,
-					// 		enc.encode(JSON.stringify(pc.localDescription))
-					// 	)
-					// )
-					await c.encrypt(pc.localDescription)
-				);
+				const candidate = await c.decrypt<RTCIceCandidateInit>(msg.data);
+				await pc.addIceCandidate(new RTCIceCandidate(candidate));
 			}
 		});
 
-		// pc.onnegotiationneeded = async () => {
-		// 	try {
-		// 		await pc.setLocalDescription(await pc.createOffer());
-		// 		// Send the offer to the other peer.
-		// 		offer = JSON.stringify(pc.localDescription);
-		// 	} catch (err) {
-		// 		console.error(err);
-		// 	}
-		// };
-		pc.onicecandidate = async (a) => {
-			console.log(a);
+		// Wait for the remote peer to send their local description
+		const answer = await natsOnce<RTCSessionDescriptionInit>(nc, c, 'relaying.offer.device');
+		await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+		// Create an answer and set it as the local description
+		await pc.setLocalDescription(await pc.createAnswer());
+
+		// Offer my local description to the remote peer
+		nc.publish(`relaying.offer.host`, await c.encrypt(pc.localDescription));
+
+		// Wait for the ICE gathering to complete
+		pc.onicegatheringstatechange = async () => {
+			if (pc.iceGatheringState === 'complete') {
+				// ICE gathering is complete, we can stop listening for ICE candidates
+				iceSub.unsubscribe();
+				pc.onicecandidate = null;
+
+				// Send a message to the remote peer to tell them that we're done
+				nc.publish(`relaying.done.host`, await c.encrypt(''));
+			}
 		};
-		// const { default: SimplePeer } = await import('simple-peer');
-		// peer = new SimplePeer({ initiator: true });
-		// peer.on('signal', (data) => {
-		// 	offer = JSON.stringify(data);
-		// });
-		// peer.on('error', (err) => {
-		// 	console.log(err);
-		// });
-		// const onCall = (conn: MediaConnection) => {
-		// 	conn.answer();
-		// 	console.log(conn);
-		// 	conn.on('iceStateChanged', (state) => (state === 'disconnected' ? location.reload() : null));
-		// 	conn.on('stream', (stream) => {
-		// 		connected = true;
-		// 		video.srcObject = stream;
-		// 	});
-		// };
-		// peer.
+
+		// Wait for the remote peer to tell us that they're done
+		await natsOnce(nc, c, 'relaying.done.device');
+
+		pc.ontrack = ({ track }) => {
+			// When the remote peer sends a track, add it to the video element
+			video.srcObject = new MediaStream([track]);
+			connected = true;
+		};
 	});
 </script>
 
@@ -103,7 +88,6 @@
 		</h1>
 		<div class="w-3/4 sm:w-[unset] sm:h-1/2 aspect-square bg-stone-200 rounded-md">
 			{@html data.qrCode}
-			<!-- <pre>{offer}</pre> -->
 		</div>
 	{/if}
 
