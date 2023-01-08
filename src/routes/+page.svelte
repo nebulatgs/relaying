@@ -1,12 +1,16 @@
 <script lang="ts">
-	import { EncryptDecrypt, natsOnce } from '$lib/utils';
+	import { EncryptDecrypt, natsOnce, State } from '$lib/utils';
 	import { onMount } from 'svelte';
 	import type { PageData } from './$types';
 
 	export let data: PageData;
 
 	let video: HTMLVideoElement;
-	let connected = false;
+	let state = State.Start;
+
+	$: if (state === State.Disconnected) {
+		window.location.reload();
+	}
 
 	onMount(async () => {
 		// Initialize the encryption/decryption class
@@ -29,6 +33,23 @@
 				}
 			]
 		});
+
+		// Set up the PeerConnection state change handler
+		pc.onconnectionstatechange = () => {
+			if (pc.connectionState === 'connected' && state !== State.TrackStarted) {
+				state = State.Connected;
+			} else if (pc.connectionState === 'disconnected') {
+				state = State.Disconnected;
+			}
+		};
+
+		// Set up the track handler
+		pc.ontrack = ({ track }) => {
+			console.log('track', track);
+			// When the remote peer sends a track, add it to the video element
+			video.srcObject = new MediaStream([track]);
+			state = State.TrackStarted;
+		};
 
 		pc.onicecandidate = async ({ candidate }) => {
 			if (candidate) {
@@ -54,38 +75,18 @@
 
 		// Offer my local description to the remote peer
 		nc.publish(`relaying.offer.host`, await c.encrypt(pc.localDescription));
-
-		// Wait for the ICE gathering to complete
-		pc.onicegatheringstatechange = async () => {
-			if (pc.iceGatheringState === 'complete') {
-				// ICE gathering is complete, we can stop listening for ICE candidates
-				iceSub.unsubscribe();
-				pc.onicecandidate = null;
-
-				// Send a message to the remote peer to tell them that we're done
-				nc.publish(`relaying.done.host`, await c.encrypt(''));
-			}
-		};
-
-		// Wait for the remote peer to tell us that they're done
-		await natsOnce(nc, c, 'relaying.done.device');
-
-		pc.ontrack = ({ track }) => {
-			// When the remote peer sends a track, add it to the video element
-			video.srcObject = new MediaStream([track]);
-			connected = true;
-		};
 	});
 </script>
 
 <div class="h-screen w-full flex flex-wrap justify-evenly items-center">
-	{#if !connected}
-		<h1 class="font-mono text-7xl lg:text-9xl tracking-wide text-slate-700 ">
+	{#if state === State.Start}
+		<!-- <h1 class="font-mono text-7xl lg:text-9xl tracking-wide text-slate-700 ">
 			{data.code}
 		</h1>
 		<h1 class="font-mono text-7xl lg:text-9xl tracking-wide text-slate-700 ">
 			{data.iv}
-		</h1>
+		</h1> -->
+		<h1 class="font-mono text-7xl lg:text-9xl tracking-wide text-slate-700 ">relay -></h1>
 		<div class="w-3/4 sm:w-[unset] sm:h-1/2 aspect-square bg-stone-200 rounded-md">
 			{@html data.qrCode}
 		</div>
@@ -93,8 +94,11 @@
 
 	<video
 		autoplay
+		muted
 		playsinline
 		bind:this={video}
-		class={connected ? 'absolute top-0 left-0 w-full h-full object-cover' : 'hidden'}
+		class={state === State.TrackStarted
+			? 'absolute top-0 left-0 w-full h-full object-cover'
+			: 'hidden'}
 	/>
 </div>

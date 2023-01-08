@@ -1,14 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { EncryptDecrypt, natsOnce } from '$lib/utils';
+	import { EncryptDecrypt, natsOnce, State } from '$lib/utils';
 	import { onMount } from 'svelte';
-
-	enum State {
-		Start = 'start',
-		Connecting = 'connecting',
-		Connected = 'connected',
-		Disconnected = 'disconnected'
-	}
 
 	interface Resolution {
 		width: number;
@@ -22,6 +15,7 @@
 	let deviceIndex = 0;
 	let resolutionIndex = 3;
 	let state = State.Start;
+	let video: HTMLVideoElement;
 
 	const errors = {
 		resolution: 'The specified resolution is unavailable',
@@ -67,6 +61,7 @@
 			video: { deviceId: devices[deviceIndex].deviceId, width: resolutions[resolutionIndex].width },
 			audio: false
 		});
+		video.srcObject = stream;
 
 		// Open a new PeerConnection
 		const pc = new RTCPeerConnection({
@@ -78,6 +73,15 @@
 				}
 			]
 		});
+
+		// Set up the PeerConnection state change handler
+		pc.onconnectionstatechange = () => {
+			if (pc.connectionState === 'connected') {
+				state = State.Connected;
+			} else if (pc.connectionState === 'disconnected') {
+				state = State.Disconnected;
+			}
+		};
 
 		// Add the user's media to the PeerConnection
 		stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -106,21 +110,6 @@
 		// Wait for the remote peer to send their local description
 		const answer = await natsOnce<RTCSessionDescriptionInit>(nc, c, 'relaying.offer.host');
 		await pc.setRemoteDescription(new RTCSessionDescription(answer));
-
-		// Wait for the ICE gathering to complete
-		pc.onicegatheringstatechange = async () => {
-			if (pc.iceGatheringState === 'complete') {
-				// ICE gathering is complete, we can stop listening for ICE candidates
-				iceSub.unsubscribe();
-				pc.onicecandidate = null;
-
-				// Send a message to the remote peer to tell them that we're done
-				nc.publish(`relaying.done.device`, await c.encrypt(''));
-			}
-		};
-
-		// Wait for the remote peer to tell us that they're done
-		await natsOnce(nc, c, 'relaying.done.host');
 	}
 </script>
 
@@ -172,6 +161,17 @@
 			</div>
 		</div>
 	{:else if state === State.Connecting}
-		a
+		Connecting to host...
+	{:else if state === State.Disconnected}
+		Disconnected from host, close this page and scan the QR code again.
 	{/if}
+	<video
+		autoplay
+		muted
+		playsinline
+		bind:this={video}
+		class={state === State.Connected
+			? 'absolute top-0 left-0 w-full h-full object-cover'
+			: 'hidden'}
+	/>
 </div>

@@ -1,5 +1,13 @@
 import type { NatsConnection } from 'nats.ws';
 
+export enum State {
+	Start = 'start',
+	Connecting = 'connecting',
+	Connected = 'connected',
+	Disconnected = 'disconnected',
+	TrackStarted = 'trackStarted'
+}
+
 export class EncryptDecrypt {
 	private isInitialized = false;
 	private key?: CryptoKey;
