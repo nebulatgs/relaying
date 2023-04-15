@@ -1,7 +1,7 @@
 import * as QRcode from 'qrcode';
 import type { PageServerLoad } from './$types';
 
-export const generateCode = () =>
+const generateCode = () =>
 	[...crypto.getRandomValues(new Uint8Array(4))]
 		.map((v) => v.toString(16).padStart(2, '0').toLocaleUpperCase())
 		.join('');
