@@ -1,13 +1,13 @@
 import * as QRcode from 'qrcode';
 import type { PageServerLoad } from './$types';
 
-// export const generateCode = () =>
-// 	[...crypto.getRandomValues(new Uint8Array(4))]
-// 		.map((v) => v.toString(16).padStart(2, '0').toLocaleUpperCase())
-// 		.join('');
+export const generateCode = () =>
+	[...crypto.getRandomValues(new Uint8Array(4))]
+		.map((v) => v.toString(16).padStart(2, '0').toLocaleUpperCase())
+		.join('');
 
-const generateCode = async () =>
-	Buffer.from(
+const generateKey = async () =>
+	btoa(
 		JSON.stringify(
 			await crypto.subtle.exportKey(
 				'jwk',
@@ -21,12 +21,12 @@ const generateCode = async () =>
 				)
 			)
 		)
-	).toString('base64');
+	);
 
-const generateIv = async () => Buffer.from(crypto.randomUUID()).toString('base64');
+const generateIv = async () => btoa(generateCode());
 
 export const load: PageServerLoad = async ({ url }) => {
-	const code = await generateCode();
+	const code = await generateKey();
 	const iv = await generateIv();
 	const qrData = `${url}device/?code=${code}&iv=${iv}`;
 	const qrCode = await QRcode.toString(qrData, {
