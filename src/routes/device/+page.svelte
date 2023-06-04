@@ -9,7 +9,7 @@
 	}
 
 	let code: string = $page.url.searchParams.get('code') ?? '';
-	let devices: MediaDeviceInfo[] = [];
+	let videoDevices: MediaDeviceInfo[] = [];
 	let deviceIndex = 0;
 	let resolutionIndex = 3;
 
@@ -29,7 +29,7 @@
 	];
 	onMount(async () => {
 		await navigator.mediaDevices.getUserMedia({ video: true });
-		devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+		videoDevices = (await navigator.mediaDevices.enumerateDevices()).filter(
 			(d) => d.kind === 'videoinput'
 		);
 	});
@@ -37,8 +37,11 @@
 		const { Peer } = await import('peerjs');
 
 		const stream = await navigator.mediaDevices.getUserMedia({
-			video: { deviceId: devices[deviceIndex].deviceId, width: resolutions[resolutionIndex].width },
-			audio: false
+			video: {
+				deviceId: videoDevices[deviceIndex].deviceId,
+				width: resolutions[resolutionIndex].width
+			},
+			audio: true
 		});
 
 		console.log(stream);
@@ -75,7 +78,7 @@
 			bind:value={code}
 		/>
 		<select class="text-center rounded-md p-1" name="Camera" id="camera" bind:value={deviceIndex}>
-			{#each devices as device, i}
+			{#each videoDevices as device, i}
 				<option value={i}>{device.label}</option>
 			{/each}
 		</select>
